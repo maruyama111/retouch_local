@@ -1,0 +1,55 @@
+name: Build Electron App
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies
+      run: |
+        cd electron_app
+        npm install
+        
+    - name: Build Electron App
+      run: |
+        cd electron_app
+        npm run build:win
+      if: matrix.os == 'windows-latest'
+        
+    - name: Build Electron App
+      run: |
+        cd electron_app
+        npm run build:mac
+      if: matrix.os == 'macos-latest'
+        
+    - name: Upload Windows Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: windows-build
+        path: electron_app/dist/*.exe
+      if: matrix.os == 'windows-latest'
+        
+    - name: Upload macOS Artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: macos-build
+        path: electron_app/dist/*.dmg
+      if: matrix.os == 'macos-latest' 
