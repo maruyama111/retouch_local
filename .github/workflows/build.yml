@@ -16,7 +16,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     
     - name: Setup Node.js
       uses: actions/setup-node@v2
@@ -41,14 +41,14 @@ jobs:
       if: matrix.os == 'macos-latest'
         
     - name: Upload Windows Artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: windows-build
         path: electron_app/dist/*.exe
       if: matrix.os == 'windows-latest'
         
     - name: Upload macOS Artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: macos-build
         path: electron_app/dist/*.dmg
