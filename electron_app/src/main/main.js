@@ -3,6 +3,63 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
+const { spawn } = require('child_process');
+
+// バックエンドプロセスの参照を保持
+let backendProcess = null;
+
+// バックエンドの実行ファイルパスを取得
+function getBackendPath() {
+    const isDev = process.env.NODE_ENV === 'development';
+    if (isDev) {
+        // 開発環境では直接Pythonスクリプトを実行
+        return {
+            command: 'python',
+            args: [path.join(__dirname, '../../../python_backend/main.py')]
+        };
+    }
+
+    // 本番環境ではビルドされた実行ファイルを使用
+    if (process.platform === 'win32') {
+        return {
+            command: path.join(process.resourcesPath, 'backend', 'retouch_backend.exe'),
+            args: []
+        };
+    } else {
+        return {
+            command: path.join(process.resourcesPath, 'backend', 'retouch_backend'),
+            args: []
+        };
+    }
+}
+
+// バックエンドの起動
+function startBackend() {
+    const { command, args } = getBackendPath();
+    
+    console.log('Starting backend process:', command, args);
+    
+    backendProcess = spawn(command, args, {
+        stdio: 'pipe'
+    });
+
+    backendProcess.stdout.on('data', (data) => {
+        console.log('Backend stdout:', data.toString());
+    });
+
+    backendProcess.stderr.on('data', (data) => {
+        console.error('Backend stderr:', data.toString());
+    });
+
+    backendProcess.on('error', (error) => {
+        console.error('Failed to start backend:', error);
+    });
+
+    backendProcess.on('close', (code) => {
+        console.log('Backend process exited with code:', code);
+        backendProcess = null;
+    });
+}
 
 // 開発モードの場合はホットリロードを有効化
 if (process.env.NODE_ENV === 'development') {
@@ -34,8 +91,9 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 }
 
-// アプリの準備が整ったらウィンドウを作成
+// アプリの準備が整ったらウィンドウを作成とバックエンドを起動
 app.whenReady().then(() => {
+    startBackend();
     createWindow();
 
     app.on('activate', function () {
@@ -46,6 +104,13 @@ app.whenReady().then(() => {
 // 全てのウィンドウが閉じられたらアプリを終了
 app.on('window-all-closed', function () {
     if (process.platform !== 'darwin') app.quit();
+});
+
+// アプリケーション終了時にバックエンドプロセスを終了
+app.on('before-quit', () => {
+    if (backendProcess) {
+        backendProcess.kill();
+    }
 });
 
 // ファイル選択ダイアログを開く
