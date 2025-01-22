@@ -39,13 +39,13 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         cd python_backend
-        pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe --hidden-import=cv2 --add-data "models;models" main.py
+        pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe --hidden-import=cv2 --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --collect-data mediapipe --collect-all mediapipe --add-data "models;models" --noconfirm --clean main.py
 
     - name: Build Python Backend (macOS)
       if: matrix.os == 'macos-latest'
       run: |
         cd python_backend
-        pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe --hidden-import=cv2 --add-data "models:models" main.py
+        pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe --hidden-import=cv2 --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --collect-data mediapipe --collect-all mediapipe --add-data "models:models" --noconfirm --clean main.py
         
     - name: Install Electron dependencies
       run: |
