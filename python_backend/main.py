@@ -11,12 +11,38 @@ import tempfile
 import shutil
 import mediapipe as mp
 from datetime import datetime
+import sys
+import traceback
+from pathlib import Path
+import pickle
+from sklearn.preprocessing import StandardScaler
+import socket
+import time
 
 app = FastAPI(title="Retouch API")
 
+# アプリケーションのベースパスを取得
+if getattr(sys, 'frozen', False):
+    # PyInstallerでビルドされた場合
+    base_path = sys._MEIPASS
+else:
+    # 通常の実行の場合
+    base_path = os.path.dirname(os.path.abspath(__file__))
+
+# MediaPipeの設定を更新
+os.environ["MEDIAPIPE_RESOURCE_DIR"] = os.path.join(base_path, "mediapipe")
+
 # モデルディレクトリの設定
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.path.join(BASE_DIR, "models")
+if getattr(sys, 'frozen', False):
+    # 実行ファイルとして実行されている場合
+    BASE_DIR = os.path.dirname(sys.executable)
+    MODELS_DIR = os.path.join(BASE_DIR, "models")
+else:
+    # 開発環境での実行の場合
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    MODELS_DIR = os.path.join(BASE_DIR, "models")
+
+print(f"Using models directory: {MODELS_DIR}")  # デバッグ用ログ
 
 # CORS設定
 app.add_middleware(
@@ -30,6 +56,38 @@ app.add_middleware(
 # 画像処理とモデル管理のインスタンス化
 image_processor = ImageProcessor()
 model_manager = ModelManager(models_dir=MODELS_DIR)
+
+def process_image_with_mediapipe(image_path):
+    """MediaPipeを使用して画像を処理"""
+    try:
+        # MediaPipeの設定を確認
+        resource_dir = os.environ.get("MEDIAPIPE_RESOURCE_DIR", "")
+        print(f"MediaPipe resource directory: {resource_dir}")
+        print(f"Looking for model file: {os.path.join(resource_dir, 'modules/pose_landmark/pose_landmark_heavy.tflite')}")
+        
+        # 画像を読み込み
+        image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError(f"Failed to load image: {image_path}")
+            
+        # MediaPipeの処理を実行
+        with mp.solutions.pose.Pose(
+            static_image_mode=True,
+            model_complexity=2,
+            enable_segmentation=True,
+            min_detection_confidence=0.5
+        ) as pose:
+            results = pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            
+        if not results.pose_landmarks:
+            raise ValueError("No pose landmarks detected in the image")
+            
+        return results.pose_landmarks
+        
+    except Exception as e:
+        print(f"Error in process_image_with_mediapipe: {str(e)}")
+        print(f"Error traceback: {traceback.format_exc()}")
+        raise Exception(f"Failed to process image with mediapipe: {str(e)}")
 
 def save_upload_file_temp(upload_file: UploadFile) -> str:
     """アップロードされたファイルを一時ディレクトリに保存"""
@@ -136,74 +194,68 @@ async def list_models():
 
 @app.post("/api/train")
 async def train_model(
-    before_image: UploadFile = File(...),
-    after_image: UploadFile = File(...),
-    base_model: str = Form("trained_4factor_model3"),
-    new_model_name: str = Form(None)
+    before_image: UploadFile = File(..., description="レタッチ前の画像"),
+    after_image: UploadFile = File(..., description="レタッチ後の画像"),
+    base_model: str = Form(default="default", description="ベースモデル名"),
+    new_model_name: str = Form(None, description="新しいモデル名")
 ):
-    """モデルの追加学習"""
+    """Train the model with a new image pair"""
+    before_path = None
+    after_path = None
+    
     try:
-        print(f"Received new_model_name: {new_model_name}")  # デバッグ用ログ
+        print("Received training request:")
+        print(f"- Base model: {base_model}")
+        print(f"- New model name: {new_model_name}")
+        print(f"- Before image: {before_image.filename}")
+        print(f"- After image: {after_image.filename}")
+        print(f"- Models directory: {MODELS_DIR}")
+
+        # 一時ファイルを作成
+        before_path = tempfile.mktemp(suffix='.jpg')
+        after_path = tempfile.mktemp(suffix='.jpg')
         
-        # 画像の一時保存
-        before_path = save_upload_file_temp(before_image)
-        after_path = save_upload_file_temp(after_image)
+        # ファイルを保存
+        with open(before_path, 'wb') as f:
+            content = await before_image.read()
+            f.write(content)
+        with open(after_path, 'wb') as f:
+            content = await after_image.read()
+            f.write(content)
+            
+        print("Temporary files created:")
+        print(f"- Before image path: {before_path}")
+        print(f"- After image path: {after_path}")
+        print("- Files exist check:")
+        print(f"  - Before image exists: {os.path.exists(before_path)}")
+        print(f"  - After image exists: {os.path.exists(after_path)}")
 
-        # 画像の読み込み
-        before_img = cv2.imread(before_path)
-        after_img = cv2.imread(after_path)
+        # 画像を処理
+        before_landmarks = process_image_with_mediapipe(before_path)
+        after_landmarks = process_image_with_mediapipe(after_path)
 
-        if before_img is None or after_img is None:
-            raise ValueError("Failed to load images")
+        # ランドマークを特徴量に変換
+        before_features = np.array([[landmark.x, landmark.y, landmark.z] for landmark in before_landmarks.landmark]).flatten()
+        after_features = np.array([[landmark.x, landmark.y, landmark.z] for landmark in after_landmarks.landmark]).flatten()
 
-        # 特徴量の抽出（before画像）
-        before_landmarks = image_processor.get_landmarks(before_img)
-        if not before_landmarks:
-            raise ValueError("No landmarks detected in before image")
+        # 変換比率を計算
+        ratio = after_features / (before_features + 1e-8)
+        targets = np.array([[ratio.mean()]])
 
-        before_body_coords = image_processor.extract_body_region(before_img, before_landmarks)
-        before_body_rgb = image_processor.extract_body_features(before_img, before_body_coords)
-
-        h, w, _ = before_img.shape
-        with mp.solutions.face_mesh.FaceMesh(static_image_mode=True) as face_mesh:
-            results = face_mesh.process(cv2.cvtColor(before_img, cv2.COLOR_BGR2RGB))
-            if results.multi_face_landmarks:
-                before_left_cheek, before_right_cheek = image_processor.get_cheek_landmarks(
-                    results.multi_face_landmarks[0], h, w
-                )
-
-        before_left_rgb = image_processor.extract_cheek_region(before_img, before_left_cheek)
-        before_right_rgb = image_processor.extract_cheek_region(before_img, before_right_cheek)
-        before_cheek_rgb = np.vstack([before_left_rgb, before_right_rgb])
-
-        # 特徴量の計算（before画像）
-        before_body_features = image_processor.calculate_features(before_body_rgb)
-        before_cheek_features = image_processor.calculate_features(before_cheek_rgb)
-        before_image_features = image_processor.calculate_features(before_img.reshape(-1, 3))
-
-        # 入力特徴量の作成
-        features = np.array([[
-            before_image_features['brightness'],
-            before_cheek_features['brightness'],
-            before_body_features['saturation'],
-            before_body_features['contrast']
-        ]])
-
-        # 目標値の計算（after画像とbefore画像の比率）
-        ratio = after_img.astype(np.float32) / (before_img.astype(np.float32) + 1e-8)
-        targets = np.array([
-            [ratio[:, :, 0].mean(), ratio[:, :, 1].mean(), ratio[:, :, 2].mean()]
-        ])
-
-        # モデルの学習
-        if new_model_name and new_model_name.strip():
-            model_name = new_model_name.strip()
-            print(f"Using custom model name: {model_name}")  # デバッグ用ログ
+        # モデルを保存
+        if new_model_name:
+            model_name = new_model_name
         else:
             model_name = f"{base_model}_extended_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            print(f"Using default model name: {model_name}")  # デバッグ用ログ
-
-        model_manager.train_model(features, targets, model_name)
+            
+        model_path = os.path.join(MODELS_DIR, f"{model_name}.pkl")
+        
+        # モデルデータを保存
+        model_data = {
+            'ratio': ratio
+        }
+        with open(model_path, 'wb') as f:
+            pickle.dump(model_data, f)
 
         return {
             "status": "success",
@@ -212,14 +264,51 @@ async def train_model(
         }
 
     except Exception as e:
-        print(f"Error in train_model: {str(e)}")  # デバッグ用ログ
-        return {"status": "error", "message": str(e)}
+        print(f"Error in train_model: {str(e)}")
+        print(f"Error traceback: {traceback.format_exc()}")
+        return {
+            "status": "error",
+            "message": f"画像ペアの学習に失敗しました: {str(e)}"
+        }
+
     finally:
-        # 一時ファイルの削除
-        if 'before_path' in locals() and os.path.exists(before_path):
-            os.remove(before_path)
-        if 'after_path' in locals() and os.path.exists(after_path):
-            os.remove(after_path)
+        # 一時ファイルを削除
+        for temp_path in [before_path, after_path]:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                    print(f"Cleaned up temporary file: {temp_path}")
+                except Exception as e:
+                    print(f"Error cleaning up temporary file {temp_path}: {str(e)}")
+
+def find_available_port(start_port, max_attempts=100):
+    """利用可能なポートを見つける"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('127.0.0.1', port))
+                s.close()  # 明示的にソケットを閉じる
+                return port
+        except OSError:
+            continue
+    raise RuntimeError(f"No available ports found in range {start_port}-{start_port + max_attempts - 1}")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
+    # 環境変数からポート番号を取得（デフォルトは8000）
+    initial_port = int(os.environ.get('PORT', 8000))
+    
+    # 利用可能なポートを見つける
+    try:
+        port = find_available_port(initial_port)
+        print(f"Selected port: {port}")
+        
+        # FastAPIアプリケーションの起動
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="info"
+        )
+    except Exception as e:
+        print(f"Failed to start server: {e}")
+        sys.exit(1) 

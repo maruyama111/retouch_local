@@ -1,7 +1,7 @@
 {
   "name": "retouch-app",
   "version": "1.0.0",
-  "description": "Desktop application for photo retouching",
+  "description": "Image Retouch Application",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
@@ -21,20 +21,32 @@
       "src/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "../python_backend/dist/retouch_backend.exe",
+        "to": "backend/retouch_backend.exe"
+      },
+      {
+        "from": "../python_backend/dist/",
+        "to": "backend/",
+        "filter": ["*.dll", "*.pyd", "*.manifest"]
+      },
+      {
+        "from": "../python_backend/models",
+        "to": "backend/models"
+      }
+    ],
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "build/icon.ico"
+      "target": "portable"
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "build/icon.icns",
@@ -59,9 +71,9 @@
   "dependencies": {
     "@emotion/react": "^11.11.3",
     "@emotion/styled": "^11.11.0",
-    "@mui/material": "^5.15.3",
     "@mui/icons-material": "^5.15.3",
-    "axios": "^1.6.5",
+    "@mui/material": "^5.15.3",
+    "axios": "^1.6.2",
     "form-data": "^4.0.0"
   }
-} 
+}
