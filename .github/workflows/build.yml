@@ -48,7 +48,7 @@ jobs:
              "dist/mac/Retouch App.app/Contents/Resources/backend/"
 
       - name: Upload macOS Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macos-build
           path: |
