@@ -31,6 +31,12 @@ jobs:
         uses: actions/setup-node@v2
         with:
           node-version: '18'
+
+      - name: Install Electron dependencies
+        run: |
+          cd electron_app
+          npm install
+      
       - name: Build Electron (macOS)
         run: |
           cd electron_app
@@ -40,3 +46,11 @@ jobs:
           # PyInstaller で生成されたバイナリ (拡張子なし)
           cp ../python_backend/dist/retouch_backend \
              "dist/mac/Retouch App.app/Contents/Resources/backend/"
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macos-build
+          path: |
+            electron_app/dist/*.dmg
+            electron_app/dist/mac/
