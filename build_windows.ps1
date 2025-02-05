@@ -1,20 +1,21 @@
 # Windows用ビルドスクリプト
 
+
 # Python環境のセットアップ
-Write-Host "Installing Python dependencies..."
-cd python_backend
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install pyinstaller
+#Write-Host "Installing Python dependencies..."
+#cd python_backend
+#python -m pip install --upgrade pip
+#pip install -r requirements.txt
+#pip install pyinstaller
 
 # バックエンドのビルド
-Write-Host "Building Python backend..."
-#python -m pyinstaller retouch_backend.spec
-pyinstaller --onefile main.py --name retouch_backend
+#Write-Host "Building Python backend..."
+#python -m pyinstaller main.spec
+#pyinstaller --onefile main.py --name retouch_backend
 
 # Electronアプリのビルド
 Write-Host "Building Electron app..."
-cd ../electron_app
+cd electron_app
 npm install
 
 # Electronアプリのビルドとバックエンドの統合

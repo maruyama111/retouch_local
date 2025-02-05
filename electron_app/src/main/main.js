@@ -44,6 +44,7 @@ function getBackendPath() {
     const isDev = process.env.NODE_ENV === 'development';
     if (isDev) {
         const command = path.join(__dirname, '../../../python_backend/venv/Scripts/python.exe');
+        //const scriptPath = path.join(__dirname, '../../../python_backend/retouch_backend.py');
         const scriptPath = path.join(__dirname, '../../../python_backend/main.py');
         
         log('INFO', 'Development mode backend paths', {
@@ -260,17 +261,36 @@ app.whenReady().then(() => {
         });
 });
 
+// Pythonサーバーをシャットダウンする関数
+function shutdownPythonServer() {
+    return axios.get(`${API_BASE_URL}/shutdown`, { timeout: 5000 })
+    .then((res) => {
+        log('INFO', 'Successfully called /shutdown on Python backend:', res.data);
+    })
+    .catch((err) => {
+        log('ERROR', 'Failed to call /shutdown on Python backend:', err);
+    });
+}
+
 // 全てのウィンドウが閉じられたらアプリを終了
 app.on('window-all-closed', function () {
-    if (process.platform !== 'darwin') app.quit();
+    if (process.platform !== 'darwin') 
+        shutdownPythonServer()
+            .finally(() => {
+                if (backendProcess) {
+                    backendProcess.kill();
+                    backendProcess = null;
+                }
+                app.quit();
+            });
 });
 
 // アプリケーション終了時にバックエンドプロセスを終了
-app.on('before-quit', () => {
-    if (backendProcess) {
-        backendProcess.kill();
-    }
-});
+//app.on('before-quit', () => {
+//    if (backendProcess) {
+//        backendProcess.kill();
+//    }
+//});
 
 // ファイル選択ダイアログを開く
 ipcMain.handle('select-files', async (event, options) => {
@@ -284,10 +304,11 @@ ipcMain.handle('select-files', async (event, options) => {
 });
 
 // 単一画像のレタッチ処理
-ipcMain.handle('retouch-single', async (event, filePath, modelName = 'default') => {
+ipcMain.handle('retouch-single', async (event, filePath, modelName = 'trained_4factor_model3') => {
     try {
         const formData = new FormData();
         formData.append('file', fs.createReadStream(filePath));
+        // Python 側の retouch_single_image で受け取る "model_name" というキーに合わせる
         formData.append('model_name', modelName);
 
         const response = await axios.post(`${API_BASE_URL}/api/retouch/single`, formData, {
@@ -311,12 +332,13 @@ ipcMain.handle('retouch-single', async (event, filePath, modelName = 'default') 
 });
 
 // 複数画像の一括レタッチ処理
-ipcMain.handle('retouch-batch', async (event, filePaths, modelName = 'default') => {
+ipcMain.handle('retouch-batch', async (event, filePaths, modelName = 'trained_4factor_model3') => {
     try {
         const formData = new FormData();
         filePaths.forEach(filePath => {
             formData.append('files', fs.createReadStream(filePath));
         });
+        // こちらも同様に "model_name" キーで送る
         formData.append('model_name', modelName);
 
         const response = await axios.post(`${API_BASE_URL}/api/retouch/batch`, formData, {
@@ -356,9 +378,15 @@ ipcMain.handle('get-models', async () => {
     }
 });
 
+
 // モデルの追加学習
 ipcMain.handle('train-model', async (event, data) => {
     try {
+        // data が正しく渡っているかチェック
+        if (!data || !data.beforeImage || !data.afterImage) {
+            throw new Error('beforeImage/afterImage が正しく指定されていません。');
+        }
+
         const formData = new FormData();
         
         // ファイルパスの正規化（file:// プロトコルの除去とデコード）
@@ -397,8 +425,10 @@ ipcMain.handle('train-model', async (event, data) => {
             filename: afterFileName,
             contentType: 'image/jpeg'
         });
-        formData.append('base_model', data.baseModel);
-        formData.append('new_model_name', data.newModelName || '');
+        formData.append('base_model', String(data.baseModel || ''));
+        formData.append('new_model_name', String(data.newModelName || ''));
+
+        console.log('typeof newModelName:', typeof data.newModelName)
 
         console.log('Sending training request:');
         console.log('Model name:', data.newModelName);

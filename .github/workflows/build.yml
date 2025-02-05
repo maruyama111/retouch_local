@@ -8,80 +8,35 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [macos-latest, windows-latest]
-    
-    runs-on: ${{ matrix.os }}
-
+  build-mac:
+    runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v2
-      with:
-        node-version: '18'
-
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-        
-    - name: Install Python dependencies
-      run: |
-        cd python_backend
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
-
-    - name: Build Python Backend (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        cd python_backend
-        pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe --hidden-import=cv2 --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --collect-data mediapipe --collect-all mediapipe --add-data "models;models" --noconfirm --clean main.py
-
-    - name: Build Python Backend (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        cd python_backend
-        pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe --hidden-import=cv2 --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_tkagg --collect-data mediapipe --collect-all mediapipe --add-data "models:models" --noconfirm --clean main.py
-        
-    - name: Install Electron dependencies
-      run: |
-        cd electron_app
-        npm install
-        
-    - name: Build Electron App (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        cd electron_app
-        npm run build:win
-        mkdir dist/win-unpacked/backend
-        cp ../python_backend/dist/retouch_backend.exe dist/win-unpacked/backend/
-        
-    - name: Build Electron App (macOS)
-      if: matrix.os == 'macos-latest'
-      run: |
-        cd electron_app
-        npm run build:mac
-        mkdir dist/mac/Retouch\ App.app/Contents/Resources/backend
-        cp ../python_backend/dist/retouch_backend dist/mac/Retouch\ App.app/Contents/Resources/backend/
-        
-    - name: Upload Windows Artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: windows-build
-        path: |
-          electron_app/dist/*.exe
-          electron_app/dist/win-unpacked/
-      if: matrix.os == 'windows-latest'
-        
-    - name: Upload macOS Artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: macos-build
-        path: |
-          electron_app/dist/*.dmg
-          electron_app/dist/mac/
-      if: matrix.os == 'macos-latest' 
+      - uses: actions/checkout@v3
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies and build backend
+        run: |
+          cd python_backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+          pyinstaller --name retouch_backend --onefile --hidden-import=mediapipe \
+            --hidden-import=cv2 --hidden-import=matplotlib \
+            --hidden-import=matplotlib.backends.backend_tkagg \
+            --collect-data mediapipe --collect-all mediapipe \
+            --add-data "models:models" --noconfirm --clean main.py
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+      - name: Build Electron (macOS)
+        run: |
+          cd electron_app
+          npm install
+          npm run build:mac
+          mkdir -p "dist/mac/Retouch App.app/Contents/Resources/backend"
+          # PyInstaller で生成されたバイナリ (拡張子なし)
+          cp ../python_backend/dist/retouch_backend \
+             "dist/mac/Retouch App.app/Contents/Resources/backend/"

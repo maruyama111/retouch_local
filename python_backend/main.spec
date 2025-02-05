@@ -5,7 +5,9 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        (r"C:\Users\maruyama\Documents\SAMURAI\Products\ChatGPT\retouch_local\python_backend\venv\Lib\site-packages\mediapipe\modules", "mediapipe/modules"),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -16,13 +18,15 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
+    a.zipfiles,
     a.datas,
     [],
-    name='main',
+    name='main.exe',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

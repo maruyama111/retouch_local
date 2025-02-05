@@ -2,7 +2,6 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 import uvicorn
-import threading
 import os
 import cv2
 import numpy as np
@@ -19,20 +18,8 @@ import pickle
 from sklearn.preprocessing import StandardScaler
 import socket
 import time
-import asyncio
-from typing import Optional
 
-server = None  # uvicorn.Server のインスタンスを格納する変数
 app = FastAPI(title="Retouch API")
-
-# CORS設定などは省略可
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # アプリケーションのベースパスを取得
 if getattr(sys, 'frozen', False):
@@ -251,119 +238,91 @@ async def list_models():
 async def train_model(
     before_image: UploadFile = File(..., description="レタッチ前の画像"),
     after_image: UploadFile = File(..., description="レタッチ後の画像"),
-    new_model_name: str = Form("custom")
+    base_model: str = Form(default="default", description="ベースモデル名"),
+    new_model_name: str = Form(None, description="新しいモデル名")
 ):
-    
-    """
-    1) Before画像から特徴量(4因子)を抽出
-    2) After画像とBefore画像のR/G/B平均色の差分を targets として作成
-    3) model_manager.train_model(features, targets, model_name) を呼び出し、R/G/B用の回帰モデルを学習
-    """
-    
-    temp_before = None
-    temp_after = None
+    """Train the model with a new image pair"""
+    before_path = None
+    after_path = None
     
     try:
-        # 1) 一時ファイルへ保存
-        temp_before = save_upload_file_temp(before_image)
-        temp_after = save_upload_file_temp(after_image)
-        
-        before_img = cv2.imread(temp_before)
-        after_img = cv2.imread(temp_after)
-        
-        if before_img is None:
-            raise ValueError("Failed to load before_image")
-        if after_img is None:
-            raise ValueError("Failed to load after_image")
-        
-        # 2) Before画像とAfter画像、それぞれで「ボディ領域」「頬領域」を検出
-        #    -- before画像で 4-factor (features) を作成
-        #    -- after画像で R/G/B の平均色を求め、beforeとの比率を学習ターゲットに
-        # ----------------------------------------------------------
-        
-        # (a) before画像のランドマーク
-        before_landmarks = image_processor.get_landmarks(before_img)
-        if not before_landmarks:
-            raise ValueError("No landmarks detected in before_image")
-        
-        before_body_coords = image_processor.extract_body_region(before_img, before_landmarks)
-        before_body_rgb = image_processor.extract_body_features(before_img, before_body_coords)
-        
-        # 頬領域
-        h_b, w_b, _ = before_img.shape
-        before_cheek_rgb = np.array([])
-        with mp.solutions.face_mesh.FaceMesh(static_image_mode=True) as face_mesh:
-            results_b = face_mesh.process(cv2.cvtColor(before_img, cv2.COLOR_BGR2RGB))
-            if results_b.multi_face_landmarks:
-                left_cheek_b, right_cheek_b = image_processor.get_cheek_landmarks(
-                    results_b.multi_face_landmarks[0], h_b, w_b
-                )
-                left_rgb_b = image_processor.extract_cheek_region(before_img, left_cheek_b)
-                right_rgb_b = image_processor.extract_cheek_region(before_img, right_cheek_b)
-                if len(left_rgb_b) > 0:
-                    before_cheek_rgb = np.vstack([left_rgb_b, right_rgb_b])
+        print("Received training request:")
+        print(f"- Base model: {base_model}")
+        print(f"- New model name: {new_model_name}")
+        print(f"- Before image: {before_image.filename}")
+        print(f"- After image: {after_image.filename}")
+        print(f"- Models directory: {MODELS_DIR}")
 
-        before_body_features = image_processor.calculate_features(before_body_rgb)
-        before_image_features = image_processor.calculate_features(before_img.reshape(-1, 3))
-        if before_cheek_rgb.size > 0:
-            before_cheek_features = image_processor.calculate_features(before_cheek_rgb)
+        # 一時ファイルを作成
+        before_path = tempfile.mktemp(suffix='.jpg')
+        after_path = tempfile.mktemp(suffix='.jpg')
+        
+        # ファイルを保存
+        with open(before_path, 'wb') as f:
+            content = await before_image.read()
+            f.write(content)
+        with open(after_path, 'wb') as f:
+            content = await after_image.read()
+            f.write(content)
+            
+        print("Temporary files created:")
+        print(f"- Before image path: {before_path}")
+        print(f"- After image path: {after_path}")
+        print("- Files exist check:")
+        print(f"  - Before image exists: {os.path.exists(before_path)}")
+        print(f"  - After image exists: {os.path.exists(after_path)}")
+
+        # 画像を処理
+        before_landmarks = process_image_with_mediapipe(before_path)
+        after_landmarks = process_image_with_mediapipe(after_path)
+
+        # ランドマークを特徴量に変換
+        before_features = np.array([[landmark.x, landmark.y, landmark.z] for landmark in before_landmarks.landmark]).flatten()
+        after_features = np.array([[landmark.x, landmark.y, landmark.z] for landmark in after_landmarks.landmark]).flatten()
+
+        # 変換比率を計算
+        ratio = after_features / (before_features + 1e-8)
+        targets = np.array([[ratio.mean()]])
+
+        # モデルを保存
+        if new_model_name:
+            model_name = new_model_name
         else:
-            before_cheek_features = {"brightness": 0, "saturation": 0, "contrast": 0}
+            model_name = f"{base_model}_extended_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+        model_path = os.path.join(MODELS_DIR, f"{model_name}.pkl")
         
-        # --- Beforeの4-factor特徴量 (Brightness, CheekBrightness, Saturation, Contrast)
-        before_features_4 = np.array([[
-            before_image_features['brightness'],
-            before_cheek_features['brightness'],
-            before_body_features['saturation'],
-            before_body_features['contrast']
-        ]], dtype=np.float32)
-        
-        # --- (B) 画像全体のRGB平均値の変化「率」を計算 ---
-        # OpenCV では画素順が (B, G, R) なので注意
-        # ここでは R, G, B の「全画素平均」の変化率 = after / before
-        before_mean_bgr = before_img.reshape(-1, 3).mean(axis=0)  # [B, G, R]
-        after_mean_bgr = after_img.reshape(-1, 3).mean(axis=0)    # [B, G, R]
+        # モデルデータを保存
+        model_data = {
+            #'ratio': ratio
+            'coefficients': ratio  # そのまま比率を係数扱いで保存
+        }
+        with open(model_path, 'wb') as f:
+            pickle.dump(model_data, f)
 
-        # 各チャネルごとに ratio = after / (before + 1e-8)
-        # model_manager.train_model では R/G/B の順を想定しているので順番を合わせる
-        #  -> i=0 => R, i=1 => G, i=2 => B
-        ratio_r = after_mean_bgr[2] / (before_mean_bgr[2] + 1e-8)
-        ratio_g = after_mean_bgr[1] / (before_mean_bgr[1] + 1e-8)
-        ratio_b = after_mean_bgr[0] / (before_mean_bgr[0] + 1e-8)
-
-        targets = np.array([[ratio_r, ratio_g, ratio_b]], dtype=np.float32)
-
-        # --- (C) model_manager.train_model(features, targets, model_name) で学習 ---
-        model_manager.train_model(before_features_4, targets, model_name=new_model_name)
-        
         return {
             "status": "success",
-            "message": f"Model '{new_model_name}' trained successfully (ratio-based)."
+            "message": "Model training completed",
+            "new_model": model_name
         }
-        
+
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        print(f"Error in train_model: {str(e)}")
+        print(f"Error traceback: {traceback.format_exc()}")
+        return {
+            "status": "error",
+            "message": f"画像ペアの学習に失敗しました: {str(e)}"
+        }
+
     finally:
-        for p in [temp_before, temp_after]:
-            if p and os.path.exists(p):
-                os.remove(p)
-
-@app.get("/shutdown")
-def shutdown_server():
-    """
-    サーバーを終了するためのエンドポイント。
-    Electron 側からこのエンドポイントを呼び出してからアプリを閉じるようにすると、
-    Uvicorn サーバーが正常終了してポートを解放する。
-    """
-    def stopper():
-        # 少し待ってからサーバーを止める
-        time.sleep(0.5)
-        if server is not None:
-            server.should_exit = True
-
-    threading.Thread(target=stopper).start()
-    return {"message": "Shutting down the server..."}
-
+        # 一時ファイルを削除
+        for temp_path in [before_path, after_path]:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                    print(f"Cleaned up temporary file: {temp_path}")
+                except Exception as e:
+                    print(f"Error cleaning up temporary file {temp_path}: {str(e)}")
 
 def find_available_port(start_port, max_attempts=100):
     """利用可能なポートを見つける"""
@@ -377,14 +336,22 @@ def find_available_port(start_port, max_attempts=100):
             continue
     raise RuntimeError(f"No available ports found in range {start_port}-{start_port + max_attempts - 1}")
 
-def main():
-    global server
-    import uvicorn
-    
-    port = int(os.environ.get("PORT", 8080))
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
-    server = uvicorn.Server(config)
-    server.run()
-
 if __name__ == "__main__":
-    main()
+    # 環境変数からポート番号を取得（デフォルトは8000）
+    initial_port = int(os.environ.get('PORT', 8000))
+    
+    # 利用可能なポートを見つける
+    try:
+        port = find_available_port(initial_port)
+        print(f"Selected port: {port}")
+        
+        # FastAPIアプリケーションの起動
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=port,
+            log_level="info"
+        )
+    except Exception as e:
+        print(f"Failed to start server: {e}")
+        sys.exit(1) 
