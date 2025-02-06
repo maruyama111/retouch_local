@@ -2,10 +2,12 @@
 
 
 a = Analysis(
-    ['main.py'],
+    ['retouch_backend.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        (r"C:\Users\maruyama\Documents\SAMURAI\Products\ChatGPT\retouch_local\python_backend\venv\Lib\site-packages\mediapipe\modules", "mediapipe/modules"),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
