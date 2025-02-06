@@ -44,8 +44,8 @@ function getBackendPath() {
     const isDev = process.env.NODE_ENV === 'development';
     if (isDev) {
         const command = path.join(__dirname, '../../../python_backend/venv/Scripts/python.exe');
-        //const scriptPath = path.join(__dirname, '../../../python_backend/retouch_backend.py');
-        const scriptPath = path.join(__dirname, '../../../python_backend/main.py');
+        const scriptPath = path.join(__dirname, '../../../python_backend/retouch_backend.py');
+        //const scriptPath = path.join(__dirname, '../../../python_backend/main.py');
         
         log('INFO', 'Development mode backend paths', {
             command,
@@ -61,7 +61,8 @@ function getBackendPath() {
     }
 
     // 本番環境ではビルドされた実行ファイルを使用
-    const backendPath = path.join(process.resourcesPath, 'backend', 'retouch_backend.exe');
+    //const backendPath = path.join(process.resourcesPath, 'backend', 'retouch_backend.exe');
+    const backendPath = path.join(process.resourcesPath, 'backend', 'retouch_backend');
     log('INFO', 'Production mode backend path', {
         backendPath,
         exists: fs.existsSync(backendPath),
