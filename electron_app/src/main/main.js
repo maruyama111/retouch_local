@@ -61,17 +61,15 @@ function getBackendPath() {
     }
 
     // 本番環境ではビルドされた実行ファイルを使用
-    //const backendPath = path.join(process.resourcesPath, 'backend', 'retouch_backend.exe');
-    const backendPath = path.join(process.resourcesPath, 'backend', 'retouch_backend');
-    log('INFO', 'Production mode backend path', {
-        backendPath,
-        exists: fs.existsSync(backendPath),
-        resourcesPath: process.resourcesPath,
-        stats: fs.existsSync(backendPath) ? fs.statSync(backendPath) : null
+    // 絶対パスで指定するため、process.resourcesPathを使って解決する
+    const backendExecutable = path.join(process.resourcesPath, 'backend', 'retouch_backend');
+    log('INFO', 'Production mode backend absolute path', {
+        backendExecutable,
+        exists: fs.existsSync(backendExecutable)
     });
     
     // バックエンドディレクトリの内容を確認
-    const backendDir = path.dirname(backendPath);
+    const backendDir = path.dirname(backendExecutable);
     if (fs.existsSync(backendDir)) {
         try {
             const files = fs.readdirSync(backendDir);
@@ -87,7 +85,7 @@ function getBackendPath() {
     }
     
     return {
-        command: backendPath,
+        command: backendExecutable,
         args: []
     };
 }
@@ -126,7 +124,7 @@ function startBackend() {
             const env = {
                 ...process.env,
                 PYTHONUNBUFFERED: '1',
-                PATH: `${backendDir};${process.env.PATH}`,
+                PATH: `${backendDir}${path.delimiter}${process.env.PATH}`,
                 PYTHONPATH: backendDir,
                 MODELS_DIR: modelsDir,
                 PORT: BACKEND_PORT.toString()  // ポート番号を環境変数として渡す
