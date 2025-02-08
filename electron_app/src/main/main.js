@@ -142,7 +142,6 @@ function startBackend() {
                 env: env,
                 cwd: backendDir,
                 windowsHide: false,
-                shell: true
             });
 
             if (!backendProcess) {
