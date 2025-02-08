@@ -210,7 +210,7 @@ function startBackend() {
                 }
                 reject(new Error('Backend server startup timeout'));
             }
-        }, 30000);
+        }, 60000);
     });
 }
 
